@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Call</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #0b1120;
+            color: #f3f4f6;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #call-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: #0b1120;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Remote Video (Full Screen) */
+        #remote-video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background-color: #0b1120;
+        }
+
+        /* Local Video (Floating Picture-in-Picture) */
+        #local-video-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 2px solid #3b82f6;
+            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+            background-color: #1e293b;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+
+        #local-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror local camera */
+        }
+
+        /* Avatar Placeholder when video is disabled or for audio calls */
+        .avatar-placeholder {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at center, #1e293b 0%, #0b1120 100%);
+            z-index: 5;
+        }
+
+        .avatar-circle {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 42px;
+            font-weight: 700;
+            color: #ffffff;
+            box-shadow: 0 0 35px rgba(99, 102, 241, 0.45);
+            margin-bottom: 16px;
+        }
+
+        .avatar-name {
+            font-size: 20px;
+            font-weight: 600;
+            color: #f1f5f9;
+            margin-bottom: 8px;
+        }
+
+        .avatar-sub {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        /* Sound wave indicator */
+        .wave-container {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 18px;
+            height: 30px;
+        }
+
+        .wave-bar {
+            width: 4px;
+            background-color: #38bdf8;
+            border-radius: 2px;
+            animation: waveAnim 1.2s ease-in-out infinite;
+        }
+
+        .wave-bar:nth-child(1) { height: 8px; animation-delay: 0.0s; }
+        .wave-bar:nth-child(2) { height: 18px; animation-delay: 0.15s; }
+        .wave-bar:nth-child(3) { height: 28px; animation-delay: 0.3s; }
+        .wave-bar:nth-child(4) { height: 20px; animation-delay: 0.45s; }
+        .wave-bar:nth-child(5) { height: 10px; animation-delay: 0.6s; }
+
+        @keyframes waveAnim {
+            0%, 100% { transform: scaleY(0.4); opacity: 0.5; }
+            50% { transform: scaleY(1.0); opacity: 1; }
+        }
+
+        /* Status badge */
+        #status-badge {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 8px 16px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            font-size: 13px;
+            color: #38bdf8;
+            font-weight: 500;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .dot-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #eab308;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+        }
+
+        /* Toast warning banner */
+        #warning-banner {
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: rgba(234, 179, 8, 0.95);
+            color: #0f172a;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            z-index: 20;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="call-container">
+        <!-- Status indicator -->
+        <div id="status-badge">
+            <span class="dot-indicator" id="status-dot"></span>
+            <span id="status-text">Đang chuẩn bị...</span>
+        </div>
+
+        <!-- Warning banner -->
+        <div id="warning-banner">
+            <span id="warning-text"></span>
+        </div>
+
+        <!-- Remote Video -->
+        <video id="remote-video" autoplay playsinline></video>
+        <div id="remote-avatar" class="avatar-placeholder">
+            <div class="avatar-circle" id="remote-avatar-initial">?</div>
+            <div class="avatar-name" id="remote-avatar-name">Đang chờ kết nối...</div>
+            <div class="avatar-sub" id="remote-avatar-sub">Cuộc gọi qua mạng LAN</div>
+            <div class="wave-container" id="remote-wave">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+        </div>
+
+        <!-- Local Video (PiP) -->
+        <div id="local-video-container">
+            <video id="local-video" autoplay playsinline muted></video>
+            <div id="local-avatar" class="avatar-placeholder">
+                <div class="avatar-circle" style="width: 50px; height: 50px; font-size: 20px; margin-bottom: 0;">Tôi</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const pcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ],
+            iceCandidatePoolSize: 0
+        };
+
+        let localStream = null;
+        let remoteStream = null;
+        let peerConnection = null;
+        let isInitiator = false;
+        let isVideoCall = true;
+        let hasCamera = false;
+        let hasMic = false;
+        // ICE can arrive before an SDP description. Never discard it: Chromium
+        // rejects addIceCandidate until remoteDescription has been applied.
+        let pendingCandidates = [];
+
+        let isMediaReady = false;
+        let mediaReadyResolve = null;
+        const mediaReadyPromise = new Promise((resolve) => {
+            mediaReadyResolve = resolve;
+        });
+
+        async function ensureMediaReady() {
+            if (isMediaReady) return;
+            await mediaReadyPromise;
+        }
+
+        function createSilentAudioStream() {
+            // A silent track keeps SDP/ICE negotiation valid when neither a camera
+            // nor microphone is available (for example, when another app owns them).
+            try {
+                const AudioContextType = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextType) return new MediaStream();
+                const audioContext = new AudioContextType();
+                const destination = audioContext.createMediaStreamDestination();
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                gain.gain.value = 0;
+                oscillator.connect(gain).connect(destination);
+                oscillator.start();
+                return destination.stream;
+            } catch (err) {
+                console.warn("Không tạo được dummy audio track:", err);
+                return new MediaStream();
+            }
+        }
+
+        const localVideo = document.getElementById('local-video');
+        const remoteVideo = document.getElementById('remote-video');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const remoteAvatar = document.getElementById('remote-avatar');
+        const localAvatar = document.getElementById('local-avatar');
+        const warningBanner = document.getElementById('warning-banner');
+        const warningText = document.getElementById('warning-text');
+
+        function sendToHost(type, payload) {
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage({ type: type, payload: payload });
+            }
+        }
+
+        function setStatus(text, color, dotColor) {
+            statusText.innerText = text;
+            if (color) statusText.style.color = color;
+            if (dotColor) {
+                statusDot.style.backgroundColor = dotColor;
+                statusDot.style.boxShadow = `0 0 8px ${dotColor}`;
+            }
+        }
+
+        function showWarning(msg) {
+            warningText.innerText = msg;
+            warningBanner.style.display = 'flex';
+            setTimeout(() => {
+                warningBanner.style.display = 'none';
+            }, 6000);
+        }
+
+        let isInitStarted = false;
+        let remoteAvatarDataUrl = null;
+
+        function setRemoteAvatar(dataUrl) {
+            if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) return;
+            remoteAvatarDataUrl = dataUrl;
+            const circle = document.getElementById('remote-avatar-initial');
+            circle.style.backgroundImage = `url("${dataUrl}")`;
+            circle.style.backgroundSize = 'cover';
+            circle.style.backgroundPosition = 'center';
+            circle.textContent = '';
+        }
+
+        // Khởi tạo thiết bị Media và PeerConnection
+        async function initCall(initiator, withVideo, remoteName, avatarDataUrl) {
+            if (isInitStarted) return;
+            isInitStarted = true;
+
+            try {
+                isInitiator = initiator;
+                isVideoCall = withVideo;
+
+                if (remoteName) {
+                    document.getElementById('remote-avatar-name').innerText = remoteName;
+                    document.getElementById('remote-avatar-initial').innerText = remoteName.substring(0, 1).toUpperCase();
+                }
+                setRemoteAvatar(avatarDataUrl || remoteAvatarDataUrl);
+
+                if (!isVideoCall) {
+                    document.getElementById('local-video-container').style.display = 'none';
+                    remoteAvatar.style.display = 'flex';
+                }
+
+                setStatus(isInitiator ? "Đang gọi đi..." : "Đang kết nối...", "#38bdf8", "#eab308");
+
+                // Thu nhận Camera và Mic
+                if (isVideoCall) {
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({
+                            audio: true,
+                            video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+                        });
+                        hasCamera = true;
+                        hasMic = true;
+                    } catch (camErr) {
+                        console.warn("Không lấy được video, thử chế độ âm thanh:", camErr);
+                        try {
+                            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                            hasCamera = false;
+                            hasMic = true;
+                            showWarning("📷 Camera đang bận hoặc không tìm thấy — Đã chuyển sang gọi thoại");
+                            localAvatar.style.display = 'flex';
+                            sendToHost('status', 'camera_unavailable');
+                        } catch (audioErr) {
+                            console.warn("Không có cả mic lẫn camera:", audioErr);
+                            hasCamera = false;
+                            hasMic = false;
+                            localStream = createSilentAudioStream();
+                            showWarning("🎙️ Không tìm thấy Microphone — Cuộc gọi chỉ nhận âm thanh");
+                            localAvatar.style.display = 'flex';
+                            sendToHost('status', 'camera_unavailable');
+                        }
+                    }
+                } else {
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                        hasMic = true;
+                    } catch (audioErr) {
+                        console.warn("Lỗi micro:", audioErr);
+                        hasMic = false;
+                        localStream = createSilentAudioStream();
+                        showWarning("🎙️ Không tìm thấy Microphone — Cuộc gọi chỉ nhận âm thanh");
+                        sendToHost('status', 'mic_unavailable');
+                    }
+                }
+
+                // Gán luồng xem trước của mình
+                if (hasCamera && localStream) {
+                    localVideo.srcObject = localStream;
+                }
+
+                // Khởi tạo PeerConnection
+                createPeerConnection();
+
+                // Đưa các tracks vào PeerConnection nếu có
+                if (localStream && peerConnection) {
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+                }
+
+                isMediaReady = true;
+                if (mediaReadyResolve) mediaReadyResolve();
+
+                sendToHost('mediaReady', {
+                    hasCamera: hasCamera,
+                    hasMic: hasMic
+                });
+
+                // Nếu là Receiver đã mở cửa sổ sau khi Accept, báo sẵn sàng nhận offer
+                if (!isInitiator) {
+                    setStatus("Đang kết nối...", "#eab308", "#eab308");
+                }
+            } catch (err) {
+                console.error("Lỗi initCall:", err);
+                isMediaReady = true;
+                if (mediaReadyResolve) mediaReadyResolve();
+                setStatus("Lỗi khởi tạo: " + err.message, "#ef4444", "#ef4444");
+                sendToHost('error', err.message);
+            }
+        }
+
+        let isConnectionEstablished = false;
+
+        function createPeerConnection() {
+            if (peerConnection) return;
+
+            peerConnection = new RTCPeerConnection(pcConfig);
+
+            peerConnection.onicecandidate = (event) => {
+                if (event && event.candidate && event.candidate.candidate) {
+                    console.log("[ICE Candidate]", event.candidate.candidate);
+                    sendToHost('signal', {
+                        type: 'ice-candidate',
+                        data: JSON.stringify(event.candidate)
+                    });
+                }
+            };
+
+            peerConnection.ontrack = (event) => {
+                console.log("[ontrack] Received remote track:", event.track.kind);
+                remoteStream = event.streams && event.streams[0]
+                    ? event.streams[0]
+                    : (remoteStream || new MediaStream());
+                if (!event.streams || !event.streams[0]) remoteStream.addTrack(event.track);
+                remoteVideo.srcObject = remoteStream;
+
+                remoteVideo.play().catch(e => {
+                    console.warn("Remote video play auto error:", e);
+                    document.body.addEventListener('click', () => remoteVideo.play(), { once: true });
+                });
+
+                if (event.track.kind === 'video') {
+                    remoteAvatar.style.display = 'none';
+                    remoteVideo.style.display = 'block';
+                }
+
+                // Some WebView2 builds raise ontrack before connectionState changes.
+                // Treat a playable remote track as a connected call for the host UI.
+                markConnected();
+            };
+
+            const markConnected = () => {
+                if (isConnectionEstablished) return;
+                isConnectionEstablished = true;
+                console.log("[WebRTC] Peer Connection Established!");
+                setStatus("Đã kết nối", "#22c55e", "#22c55e");
+                sendToHost('status', 'connected');
+            };
+
+            peerConnection.onconnectionstatechange = () => {
+                const state = peerConnection.connectionState;
+                console.log("[WebRTC] connectionState:", state);
+                if (state === 'connected') {
+                    markConnected();
+                } else if (state === 'disconnected' || state === 'failed') {
+                    setStatus("Mất kết nối", "#ef4444", "#ef4444");
+                    sendToHost('status', 'disconnected');
+                }
+            };
+
+            peerConnection.oniceconnectionstatechange = () => {
+                const state = peerConnection.iceConnectionState;
+                console.log("[WebRTC] iceConnectionState:", state);
+                if (state === 'connected' || state === 'completed') {
+                    markConnected();
+                } else if (state === 'failed') {
+                    setStatus("Lỗi kết nối", "#ef4444", "#ef4444");
+                    sendToHost('status', 'disconnected');
+                }
+            };
+        }
+
+        // Máy gọi A tạo và gửi Offer sau khi B đã chấp nhận cuộc gọi
+        async function startOffer() {
+            try {
+                await ensureMediaReady();
+                createPeerConnection();
+
+                if (peerConnection.signalingState !== 'stable') {
+                    console.warn("[WebRTC] startOffer called in non-stable state:", peerConnection.signalingState);
+                    return;
+                }
+
+                setStatus("Đang kết nối...", "#38bdf8", "#eab308");
+
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: isVideoCall
+                });
+                await peerConnection.setLocalDescription(offer);
+
+                sendToHost('signal', {
+                    type: 'offer',
+                    data: JSON.stringify(offer)
+                });
+            } catch (err) {
+                console.error("Lỗi startOffer:", err);
+                sendToHost('error', "Lỗi tạo offer: " + err.message);
+            }
+        }
+
+        // Xử lý tín hiệu WebRTC đến từ phía bên kia
+        async function handleSignal(signal) {
+            try {
+                if (!signal || !signal.type) return;
+
+                if (signal.type === 'offer') {
+                    console.log("[WebRTC] Nhận Offer từ Caller");
+                    await ensureMediaReady();
+                    createPeerConnection();
+
+                    if (peerConnection.signalingState !== 'stable') {
+                        console.warn("[WebRTC] Bỏ qua offer trùng lặp. Trạng thái hiện tại:", peerConnection.signalingState);
+                        return;
+                    }
+
+                    setStatus("Đang kết nối...", "#38bdf8", "#eab308");
+
+                    const offerDesc = new RTCSessionDescription(JSON.parse(signal.data));
+                    await peerConnection.setRemoteDescription(offerDesc);
+
+                    // Xử lý các ICE candidate đến sớm
+                    await flushPendingCandidates();
+
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+
+                    sendToHost('signal', {
+                        type: 'answer',
+                        data: JSON.stringify(answer)
+                    });
+                } else if (signal.type === 'answer') {
+                    console.log("[WebRTC] Nhận Answer từ Receiver");
+                    createPeerConnection();
+
+                    if (peerConnection.signalingState !== 'have-local-offer') {
+                        console.warn("[WebRTC] Bỏ qua answer trùng lặp. Trạng thái hiện tại:", peerConnection.signalingState);
+                        return;
+                    }
+
+                    const answerDesc = new RTCSessionDescription(JSON.parse(signal.data));
+                    await peerConnection.setRemoteDescription(answerDesc);
+
+                    // Xử lý các ICE candidate đến sớm
+                    await flushPendingCandidates();
+                } else if (signal.type === 'ice-candidate') {
+                    await addIceCandidate(signal.data);
+                } else if (signal.type === 'media-state') {
+                    const state = JSON.parse(signal.data);
+                    if (state.hasVideo === false) {
+                        remoteAvatar.style.display = 'flex';
+                    } else if (state.hasVideo === true) {
+                        remoteAvatar.style.display = 'none';
+                    }
+                }
+            } catch (err) {
+                console.error("Lỗi handleSignal:", err);
+            }
+        }
+
+        async function addIceCandidate(candidateJson) {
+            try {
+                if (!candidateJson) return;
+                const candidateObj = typeof candidateJson === 'string' ? JSON.parse(candidateJson) : candidateJson;
+                if (!candidateObj || !candidateObj.candidate) return;
+
+                const candidate = new RTCIceCandidate(candidateObj);
+
+                if (peerConnection && peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+                    await peerConnection.addIceCandidate(candidate);
+                } else {
+                    pendingCandidates.push(candidate);
+                }
+            } catch (e) {
+                console.warn("Lỗi addIceCandidate:", e);
+            }
+        }
+
+        async function flushPendingCandidates() {
+            while (pendingCandidates.length > 0) {
+                const cand = pendingCandidates.shift();
+                try {
+                    await peerConnection.addIceCandidate(cand);
+                } catch (e) {
+                    console.warn("Lỗi add queued candidate:", e);
+                }
+            }
+        }
+
+        function toggleMic(enabled) {
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = enabled;
+                });
+            }
+        }
+
+        function toggleCam(enabled) {
+            if (localStream) {
+                localStream.getVideoTracks().forEach(track => {
+                    track.enabled = enabled;
+                });
+                localAvatar.style.display = enabled ? 'none' : 'flex';
+                if (peerConnection) {
+                    sendToHost('signal', {
+                        type: 'media-state',
+                        data: JSON.stringify({ hasVideo: enabled })
+                    });
+                }
+            }
+        }
+
+        function endCall() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (e) {}
+                });
+                localStream = null;
+            }
+            if (peerConnection) {
+                try { peerConnection.close(); } catch (e) {}
+                peerConnection = null;
+            }
+            setStatus("Cuộc gọi đã kết thúc", "#94a3b8", "#94a3b8");
+        }
+
+        // Lắng nghe lệnh từ Host WinForms
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', async (event) => {
+                let msg = event.data;
+                if (typeof msg === 'string') {
+                    try { msg = JSON.parse(msg); } catch (e) { }
+                }
+                if (!msg || !msg.action) return;
+
+                switch (msg.action) {
+                    case 'init':
+                        await initCall(msg.initiator, msg.isVideo, msg.remoteName, msg.remoteAvatar);
+                        break;
+                    case 'remoteAvatar':
+                        setRemoteAvatar(msg.dataUrl);
+                        break;
+                    case 'startOffer':
+                        await startOffer();
+                        break;
+                    case 'signal':
+                        await handleSignal(msg.signal);
+                        break;
+                    case 'toggleMic':
+                        toggleMic(msg.enabled);
+                        break;
+                    case 'toggleCam':
+                        toggleCam(msg.enabled);
+                        break;
+                    case 'end':
+                        endCall();
+                        break;
+                }
+            });
+        }
+
+        // Báo cho host biết Webview đã load xong trang HTML
+        sendToHost('ready', {});
+    </script>
+</body>
+</html>
